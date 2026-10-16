@@ -8,23 +8,63 @@ Reusable per-target recon pipeline for bug bounty. Each phase feeds the next.
 
 ## Setup (once per machine)
 
+**Scripted:** `tools/kali-setup.sh` installs everything below; `tools/kali-check.sh`
+verifies it and prints what's missing with the exact install command for each gap.
+Run the check first — it's read-only.
+
 ```bash
-# ProjectDiscovery tool manager - installs subfinder, httpx, dnsx, naabu, katana, nuclei, notify, tlsx, alterx, cdncheck
+./tools/kali-setup.sh        # or: ./tools/kali-setup.sh --list  for sections
+./tools/kali-check.sh -v     # verify, with versions
+```
+
+Manual equivalent:
+
+```bash
+# System deps. massdns is a HARD dependency of puredns - puredns is just a
+# wrapper around it and fails with "massdns not found" without it.
+sudo apt install -y golang-go git curl wget jq nmap pipx massdns
+
+# ProjectDiscovery tool manager - installs subfinder, httpx, dnsx, naabu,
+# katana, nuclei, notify, tlsx, alterx, cdncheck, asnmap, interactsh-client
 go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
 pdtm -install-all
 
 # Core extras
 go install github.com/tomnomnom/anew@latest
+go install github.com/tomnomnom/unfurl@latest          # Phase 8
 go install github.com/lc/gau/v2/cmd/gau@latest
 go install github.com/ffuf/ffuf/v2@latest
 go install github.com/d3mondev/puredns/v2@latest
 go install github.com/sensepost/gowitness@latest
 go install github.com/owasp-amass/amass/v4/...@master
-pipx install arjun
-pipx install trufflehog   # or: brew install trufflehog
+go install github.com/PentestPad/subzy@latest          # Phase 3 (moved from LukaSikic)
+go install github.com/BishopFox/jsluice/cmd/jsluice@latest   # Phase 7
+go install github.com/denandz/sourcemapper@latest      # Phase 7
+go install github.com/gwen001/github-subdomains@latest # Phase 2
 
-# Wordlists
-git clone https://github.com/danielmiessler/SecLists ~/wordlists/SecLists
+# Python tools. Use pipx, NOT pip: Kali marks its system Python
+# EXTERNALLY-MANAGED (PEP 668), so `pip install` is refused.
+pipx install arjun
+pipx install xnLinkFinder     # Phase 7
+pipx install dnsvalidator     # resolvers, below
+pipx install shodan           # Phase 1 favicon pivot
+
+# trufflehog: install the Go binary (v3). Do NOT `pipx install trufflehog` -
+# the PyPI package is the abandoned v2 and has no --results flag, so the
+# Phase 7 command silently fails on it.
+curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+  | sudo sh -s -- -b /usr/local/bin
+
+# Make Go + pdtm binaries permanent
+echo 'export PATH="$PATH:$(go env GOPATH)/bin:$HOME/.pdtm/go/bin"' >> ~/.zshrc
+
+# Nuclei templates. Modern nuclei stores these in ~/.local/nuclei-templates,
+# but the -t paths in Phase 3 / Phase 9 below assume ~/nuclei-templates.
+nuclei -update-templates
+[ -d ~/nuclei-templates ] || ln -s ~/.local/nuclei-templates ~/nuclei-templates
+
+# Wordlists (~2.5 GB)
+git clone --depth 1 https://github.com/danielmiessler/SecLists ~/wordlists/SecLists
 wget -O ~/wordlists/best-dns-wordlist.txt https://wordlists-cdn.assetnote.io/data/manual/best-dns-wordlist.txt
 wget -O ~/wordlists/httparchive_directories.txt https://wordlists-cdn.assetnote.io/data/automated/httparchive_directories_1m_2024_05_28.txt
 ```
@@ -41,9 +81,12 @@ Free-tier keys worth getting: SecurityTrails, Shodan, Censys, VirusTotal, Chaos,
 
 ### Clean resolvers (required for mass DNS)
 ```bash
-pip install dnsvalidator
+pipx install dnsvalidator   # not `pip install` - PEP 668 blocks it on Kali
 dnsvalidator -tL https://public-dns.info/nameservers.txt -threads 100 -o ~/resolvers.txt
 # Refresh weekly. Stale resolvers = false positives = wasted hours.
+
+# Faster start: a pre-validated list, refreshed upstream daily
+wget -O ~/resolvers.txt https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt
 ```
 
 ---
